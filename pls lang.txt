@@ -1,0 +1,73 @@
+import os
+import cv2
+import numpy as np
+import tensorflow as tf
+from tensorflow import keras
+from keras.models import Sequential
+from keras.layers import Dense, Conv2D, MaxPooling2D, Flatten
+
+image_folder = "C:\\Users\\Asus\\Desktop\\KAPOYA\\model2"
+irradiance_folder = "C:\\Users\\Asus\\Desktop\\KAPOYA\\label_folder2"
+input_height = 256
+input_width = 256
+
+def calculate_cloud_coverage(image):
+    _, binary_image = cv2.threshold(image, 256, 256, cv2.THRESH_BINARY)
+    white_pixels = np.sum(binary_image == 255)
+    total_pixels = image.shape[0] * image.shape[1]
+    cloud_coverage = (white_pixels / total_pixels) * 100
+    return cloud_coverage
+
+x_train = []
+cloud_coverages = []
+
+for filename in os.listdir(image_folder):
+    img_path = os.path.join(image_folder, filename)
+    img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
+    img = cv2.resize(img, (input_width, input_height)) 
+    cloud_coverage = calculate_cloud_coverage(img)
+    cloud_coverages.append(cloud_coverage) 
+    x_train.append(img)
+
+x_train = np.array(x_train).reshape(-1, input_height, input_width, 1) 
+cloud_coverages = np.array(cloud_coverages).reshape(-1, 1) 
+
+y_train = []
+for filename in os.listdir(irradiance_folder):
+    irradiance_path = os.path.join(irradiance_folder, filename)
+    with open(irradiance_path, 'r') as file:
+        irradiance = float(file.read().strip())  
+    y_train.append(irradiance)
+
+y_train = np.array(y_train)
+
+model = Sequential([
+    Conv2D(64, kernel_size=(3, 3), activation='relu', input_shape=(input_height, input_width, 1)),
+    MaxPooling2D(pool_size=(2, 2)),
+    
+    Conv2D(128, kernel_size=(3, 3), activation='tanh'),
+    MaxPooling2D(pool_size=(2, 2)),
+    
+    Conv2D(256, kernel_size=(3, 3), activation='tanh'),
+    MaxPooling2D(pool_size=(2, 2)),
+    
+    Flatten(),
+    
+    Dense(256, activation='relu'),
+    Dense(128, activation='tanh'),
+    
+    Dense(1, activation='linear')
+])
+
+model.compile(optimizer='adam', loss='mean_squared_error', metrics=['mae'])
+
+model.fit(x_train, y_train, batch_size=64, epochs=50, validation_split=0.2)
+
+# Calculate MAPE
+predictions = model.predict(x_train)
+absolute_percentage_errors = np.abs((predictions - y_train) / y_train)
+mape = np.mean(absolute_percentage_errors) * 100
+print("Mean Absolute Percentage Error (MAPE):", mape)
+
+# Save the model as an .h5 file
+model.save("solar_irradiance_model.h5")
